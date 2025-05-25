@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MCP OAuth Bridge - Approvals</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f5;
+            color: #333;
+            line-height: 1.6;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .header {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        
+        .header h1 {
+            color: #2563eb;
+            margin-bottom: 10px;
+        }
+        
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .stat-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        
+        .stat-number {
+            font-size: 2em;
+            font-weight: bold;
+            color: #2563eb;
+        }
+        
+        .stat-label {
+            color: #666;
+            margin-top: 5px;
+        }
+        
+        .requests-container {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        
+        .requests-header {
+            background: #f8fafc;
+            padding: 20px;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        
+        .requests-header h2 {
+            color: #1e293b;
+        }
+        
+        .request-item {
+            padding: 20px;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        
+        .request-item:last-child {
+            border-bottom: none;
+        }
+        
+        .request-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 15px;
+        }
+        
+        .request-title {
+            font-weight: 600;
+            color: #1e293b;
+            font-size: 1.1em;
+        }
+        
+        .request-time {
+            color: #64748b;
+            font-size: 0.9em;
+        }
+        
+        .request-description {
+            color: #475569;
+            margin-bottom: 15px;
+        }
+        
+        .request-details {
+            background: #f8fafc;
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 15px;
+        }
+        
+        .request-details h4 {
+            color: #374151;
+            margin-bottom: 10px;
+        }
+        
+        .arguments {
+            background: #f1f5f9;
+            padding: 10px;
+            border-radius: 4px;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 0.9em;
+            overflow-x: auto;
+        }
+        
+        .request-actions {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+        
+        .btn-approve {
+            background: #10b981;
+            color: white;
+        }
+        
+        .btn-approve:hover {
+            background: #059669;
+        }
+        
+        .btn-deny {
+            background: #ef4444;
+            color: white;
+        }
+        
+        .btn-deny:hover {
+            background: #dc2626;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #64748b;
+        }
+        
+        .empty-state h3 {
+            margin-bottom: 10px;
+        }
+        
+        .refresh-btn {
+            background: #6366f1;
+            color: white;
+            margin-bottom: 20px;
+        }
+        
+        .refresh-btn:hover {
+            background: #4f46e5;
+        }
+        
+        .status-badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.8em;
+            font-weight: 500;
+        }
+        
+        .status-pending {
+            background: #fef3c7;
+            color: #92400e;
+        }
+        
+        .status-approved {
+            background: #d1fae5;
+            color: #065f46;
+        }
+        
+        .status-denied {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+        
+        .status-expired {
+            background: #f3f4f6;
+            color: #374151;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔐 MCP OAuth Bridge - Approvals</h1>
+            <p>Review and approve tool calls from MCP servers</p>
+        </div>
+        
+        <button class="btn refresh-btn" onclick="refreshData()">🔄 Refresh</button>
+        
+        <div class="stats" id="stats">
+            <!-- Stats will be populated by JavaScript -->
+        </div>
+        
+        <div class="requests-container">
+            <div class="requests-header">
+                <h2>Pending Approval Requests</h2>
+            </div>
+            <div id="requests">
+                <!-- Requests will be populated by JavaScript -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let refreshInterval;
+        
+        async function fetchData() {
+            try {
+                const [statsResponse, requestsResponse] = await Promise.all([
+                    fetch('/api/approvals/stats'),
+                    fetch('/api/approvals/requests')
+                ]);
+                
+                const stats = await statsResponse.json();
+                const requests = await requestsResponse.json();
+                
+                updateStats(stats);
+                updateRequests(requests);
+            } catch (error) {
+                console.error('Error fetching data:', error);
+            }
+        }
+        
+        function updateStats(stats) {
+            const statsContainer = document.getElementById('stats');
+            statsContainer.innerHTML = `
+                <div class="stat-card">
+                    <div class="stat-number">${stats.pending}</div>
+                    <div class="stat-label">Pending</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number">${stats.approved}</div>
+                    <div class="stat-label">Approved</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number">${stats.denied}</div>
+                    <div class="stat-label">Denied</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number">${stats.total}</div>
+                    <div class="stat-label">Total</div>
+                </div>
+            `;
+        }
+        
+        function updateRequests(requests) {
+            const requestsContainer = document.getElementById('requests');
+            
+            if (requests.length === 0) {
+                requestsContainer.innerHTML = `
+                    <div class="empty-state">
+                        <h3>No pending requests</h3>
+                        <p>All tool calls have been processed or no requests are waiting for approval.</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            requestsContainer.innerHTML = requests.map(request => `
+                <div class="request-item">
+                    <div class="request-header">
+                        <div class="request-title">
+                            ${request.server_name}.${request.tool_name}
+                            <span class="status-badge status-${request.status}">${request.status}</span>
+                        </div>
+                        <div class="request-time">
+                            ${new Date(request.timestamp).toLocaleString()}
+                        </div>
+                    </div>
+                    
+                    <div class="request-description">
+                        ${request.description}
+                    </div>
+                    
+                    <div class="request-details">
+                        <h4>Arguments:</h4>
+                        <div class="arguments">
+                            ${JSON.stringify(request.arguments, null, 2)}
+                        </div>
+                    </div>
+                    
+                    ${request.status === 'pending' ? `
+                        <div class="request-actions">
+                            <button class="btn btn-approve" onclick="approveRequest('${request.id}')">
+                                ✅ Approve
+                            </button>
+                            <button class="btn btn-deny" onclick="denyRequest('${request.id}')">
+                                ❌ Deny
+                            </button>
+                        </div>
+                    ` : ''}
+                </div>
+            `).join('');
+        }
+        
+        async function approveRequest(requestId) {
+            try {
+                const response = await fetch(`/api/approvals/approve/${requestId}`, {
+                    method: 'POST'
+                });
+                
+                if (response.ok) {
+                    await fetchData(); // Refresh data
+                } else {
+                    alert('Failed to approve request');
+                }
+            } catch (error) {
+                console.error('Error approving request:', error);
+                alert('Error approving request');
+            }
+        }
+        
+        async function denyRequest(requestId) {
+            try {
+                const response = await fetch(`/api/approvals/deny/${requestId}`, {
+                    method: 'POST'
+                });
+                
+                if (response.ok) {
+                    await fetchData(); // Refresh data
+                } else {
+                    alert('Failed to deny request');
+                }
+            } catch (error) {
+                console.error('Error denying request:', error);
+                alert('Error denying request');
+            }
+        }
+        
+        function refreshData() {
+            fetchData();
+        }
+        
+        // Initial load
+        fetchData();
+        
+        // Auto-refresh every 5 seconds
+        refreshInterval = setInterval(fetchData, 5000);
+        
+        // Clean up on page unload
+        window.addEventListener('beforeunload', () => {
+            if (refreshInterval) {
+                clearInterval(refreshInterval);
+            }
+        });
+    </script>
+</body>
+</html> 
