@@ -121,7 +121,7 @@ class OAuthHandler:
             # Build registration request
             registration_data = {
                 'client_name': 'MCP OAuth Bridge',
-                'redirect_uris': ['http://localhost:8080/oauth/callback'],
+                'redirect_uris': ['http://localhost:8081/oauth/callback', 'urn:ietf:wg:oauth:2.0:oob'],
                 'grant_types': ['authorization_code'],
                 'response_types': ['code'],
                 'token_endpoint_auth_method': 'none',  # Public client
@@ -151,21 +151,14 @@ class OAuthHandler:
             return None
     
     def _start_callback_server(self) -> HTTPServer:
-        """Start local HTTP server for OAuth callback
-        
-        Returns:
-            HTTPServer instance
-        """
-        server = HTTPServer(('localhost', 8080), CallbackHandler)
+        """Start temporary HTTP server for OAuth callback"""
+        server = HTTPServer(('localhost', 8081), CallbackHandler)
         server.callback_params = None
         
-        # Start server in background thread
         def run_server():
-            server.serve_forever()
+            server.handle_request()  # Handle one request then stop
         
-        thread = threading.Thread(target=run_server, daemon=True)
-        thread.start()
-        
+        threading.Thread(target=run_server, daemon=True).start()
         return server
     
     def authorize_server(self, server_name: str, server_url: str) -> bool:
@@ -290,7 +283,8 @@ class OAuthHandler:
         oauth_config: Dict[str, Any], 
         client_credentials: Dict[str, str], 
         auth_code: str, 
-        code_verifier: str
+        code_verifier: str,
+        redirect_uri: str = None
     ) -> Optional[TokenData]:
         """Exchange authorization code for access tokens
         
@@ -299,15 +293,20 @@ class OAuthHandler:
             client_credentials: Client ID and secret
             auth_code: Authorization code from callback
             code_verifier: PKCE code verifier
+            redirect_uri: Redirect URI used in authorization
             
         Returns:
             Token data or None if exchange fails
         """
         try:
+            # Use provided redirect_uri or default
+            if not redirect_uri:
+                redirect_uri = 'http://localhost:8081/oauth/callback'
+                
             token_data = {
                 'grant_type': 'authorization_code',
                 'code': auth_code,
-                'redirect_uri': 'http://localhost:8080/oauth/callback',
+                'redirect_uri': redirect_uri,
                 'code_verifier': code_verifier,
                 'client_id': client_credentials['client_id'],
             }
@@ -428,4 +427,160 @@ class OAuthHandler:
             # Get updated token data
             token_data = self.token_storage.get_token(server_name)
         
-        return token_data.access_token if token_data else None 
+        return token_data.access_token if token_data else None
+
+    async def register_client(self, oauth_config: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Async wrapper for dynamic client registration
+        
+        Args:
+            oauth_config: OAuth configuration from discovery
+            
+        Returns:
+            Client configuration dict or None if registration fails
+        """
+        return self._attempt_dynamic_registration(oauth_config)
+
+    async def authorize_server_async(self, oauth_config: Dict[str, Any], client_config: Optional[Dict[str, Any]] = None, open_browser: bool = True) -> Optional[Dict[str, Any]]:
+        """Async method for OAuth authorization flow
+        
+        Args:
+            oauth_config: OAuth configuration from discovery
+            client_config: Optional client configuration from registration
+            open_browser: Whether to open browser for authorization
+            
+        Returns:
+            Token dictionary or None if authorization fails
+        """
+        try:
+            # Use provided client config or default
+            if not client_config:
+                client_config = {
+                    'client_id': 'mcp-oauth-bridge',
+                    'client_secret': None
+                }
+            
+            # Generate PKCE parameters
+            code_verifier, code_challenge = self._generate_pkce_pair()
+            
+            # Start callback server
+            if open_browser:
+                callback_server = self._start_callback_server()
+                redirect_uri = 'http://localhost:8081/oauth/callback'
+            else:
+                callback_server = None
+                redirect_uri = 'urn:ietf:wg:oauth:2.0:oob'  # Out-of-band flow
+            
+            # Build authorization URL
+            auth_params = {
+                'response_type': 'code',
+                'client_id': client_config['client_id'],
+                'redirect_uri': redirect_uri,
+                'scope': 'read write',  # Default scope
+                'state': secrets.token_urlsafe(16),
+                'code_challenge': code_challenge,
+                'code_challenge_method': 'S256'
+            }
+            
+            auth_url = f"{oauth_config['authorization_endpoint']}?{urlencode(auth_params)}"
+            
+            if open_browser:
+                print(f"🌐 Opening browser for authorization...")
+                webbrowser.open(auth_url)
+                
+                # Wait for callback
+                start_time = time.time()
+                timeout = 300  # 5 minutes
+                
+                while time.time() - start_time < timeout:
+                    if callback_server.callback_params:
+                        break
+                    time.sleep(0.5)
+                
+                callback_server.shutdown()
+                
+                if not callback_server.callback_params:
+                    print("❌ Authorization timeout")
+                    return None
+                
+                # Get authorization code
+                params = callback_server.callback_params
+                if 'error' in params:
+                    print(f"❌ Authorization failed: {params['error'][0]}")
+                    return None
+                
+                if 'code' not in params:
+                    print("❌ No authorization code received")
+                    return None
+                
+                auth_code = params['code'][0]
+            else:
+                # Manual flow
+                print(f"Please visit the following URL to authorize:")
+                print(f"{auth_url}")
+                auth_code = input("Enter the authorization code: ").strip()
+            
+            # Exchange code for tokens
+            token_data = self._exchange_code_for_tokens(oauth_config, client_config, auth_code, code_verifier, redirect_uri)
+            if token_data:
+                # Convert TokenData to dict for CLI compatibility
+                return {
+                    'access_token': token_data.access_token,
+                    'refresh_token': token_data.refresh_token,
+                    'token_type': token_data.token_type,
+                    'expires_at': token_data.expires_at,
+                    'scope': token_data.scope
+                }
+            return None
+            
+        except Exception as e:
+            print(f"❌ Authorization error: {e}")
+            return None
+
+    async def refresh_token_async(self, oauth_config: Dict[str, Any], refresh_token: str) -> Optional[Dict[str, Any]]:
+        """Async method for token refresh
+        
+        Args:
+            oauth_config: OAuth configuration
+            refresh_token: Refresh token to use
+            
+        Returns:
+            New token dictionary or None if refresh fails
+        """
+        try:
+            print(f"🔄 Refreshing token...")
+            
+            refresh_data = {
+                'grant_type': 'refresh_token',
+                'refresh_token': refresh_token,
+            }
+            
+            response = self.session.post(
+                oauth_config['token_endpoint'],
+                data=refresh_data,
+                headers={'Content-Type': 'application/x-www-form-urlencoded'},
+                timeout=10
+            )
+            
+            if response.status_code != 200:
+                print(f"❌ Token refresh failed: {response.status_code}")
+                return None
+            
+            token_response = response.json()
+            
+            # Calculate new expiry time
+            expires_at = None
+            if 'expires_in' in token_response:
+                expires_in = int(token_response['expires_in'])
+                expires_at = (datetime.now(timezone.utc) + timedelta(seconds=expires_in)).isoformat()
+            
+            return {
+                'access_token': token_response['access_token'],
+                'refresh_token': token_response.get('refresh_token', refresh_token),
+                'token_type': token_response.get('token_type', 'Bearer'),
+                'expires_at': expires_at,
+                'scope': token_response.get('scope')
+            }
+            
+        except Exception as e:
+            print(f"❌ Token refresh error: {e}")
+            return None 

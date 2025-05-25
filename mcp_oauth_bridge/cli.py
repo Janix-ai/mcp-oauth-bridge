@@ -18,11 +18,11 @@ from typing import Optional
 import click
 import uvicorn
 
-from .config import Config
+from .config import Config, ServerConfig, ApprovalPolicy
 from .oauth import OAuthHandler
 from .discovery import OAuthDiscovery
 from .proxy import ProxyServer, run_proxy_server
-from .tokens import TokenManager
+from .tokens import TokenManager, TokenData
 
 # Setup logging
 logging.basicConfig(
@@ -56,7 +56,10 @@ def init(config_dir: Optional[str]):
         click.echo(f"✅ MCP OAuth Bridge initialized!")
         click.echo(f"📁 Configuration directory: {config.config_dir}")
         click.echo(f"🔧 Config file: {config.config_file}")
-        click.echo(f"🔑 Tokens file: {config.tokens_file}")
+        
+        # Create token manager to show tokens file path
+        token_manager = TokenManager(config.config_dir)
+        click.echo(f"🔑 Tokens file: {token_manager.tokens_file}")
         click.echo("")
         click.echo("Next steps:")
         click.echo("1. Add an MCP server: mcp-oauth-bridge add <name> <url>")
@@ -100,11 +103,11 @@ async def _add_server_async(name: str, url: str, config: Config, no_browser: boo
     try:
         # Initialize discovery
         discovery = OAuthDiscovery()
-        oauth_handler = OAuthHandler(config)
-        token_manager = TokenManager(config)
+        token_manager = TokenManager(config.config_dir)
+        oauth_handler = OAuthHandler(token_manager)
         
         # Discover OAuth configuration
-        oauth_config = await discovery.discover_oauth_server(url)
+        oauth_config = discovery.discover_oauth_config(url)
         if not oauth_config:
             click.echo(f"❌ Could not discover OAuth configuration for {url}")
             click.echo("Make sure the server supports OAuth 2.0 and returns proper WWW-Authenticate headers")
@@ -126,24 +129,32 @@ async def _add_server_async(name: str, url: str, config: Config, no_browser: boo
         if not no_browser:
             click.echo("🌐 Opening browser for authorization...")
         
-        token = await oauth_handler.authorize_server(oauth_config, client_config, not no_browser)
+        token = await oauth_handler.authorize_server_async(oauth_config, client_config, not no_browser)
         if not token:
             click.echo("❌ OAuth authorization failed")
             return
         
         # Store server configuration
-        server_config = {
-            'name': name,
-            'url': url,
-            'oauth_config': oauth_config,
-            'client_config': client_config
-        }
+        server_config = ServerConfig(
+            name=name,
+            url=url,
+            oauth_config=oauth_config,
+            approval_policy=ApprovalPolicy.ALWAYS_ASK,
+            tool_approvals={}
+        )
         
-        config.add_server(name, server_config)
+        config.add_server(server_config)
         config.save()
         
         # Store token
-        token_manager.store_token(name, token)
+        token_data = TokenData(
+            access_token=token.get('access_token'),
+            refresh_token=token.get('refresh_token'),
+            token_type=token.get('token_type', 'Bearer'),
+            expires_at=token.get('expires_at'),
+            scope=token.get('scope')
+        )
+        token_manager.store_token(name, token_data)
         
         click.echo("✅ Authorization successful! Tokens saved.")
         click.echo(f"✅ Server '{name}' added to configuration.")
@@ -199,7 +210,7 @@ def list(config_dir: Optional[str]):
         
         click.echo("🔧 Configured servers:")
         for server_name, server_config in servers.items():
-            url = server_config.get('url', 'Unknown')
+            url = server_config.url
             click.echo(f"  • {server_name}: {url}")
         
         click.echo(f"\n📊 Total: {len(servers)} server(s)")
@@ -216,7 +227,7 @@ def remove(name: str, config_dir: Optional[str]):
     """Remove a configured MCP server"""
     try:
         config = Config(config_dir)
-        token_manager = TokenManager(config)
+        token_manager = TokenManager(config.config_dir)
         
         if not os.path.exists(config.config_file):
             click.echo("❌ Configuration not initialized. Run 'mcp-oauth-bridge init' first.")
@@ -249,7 +260,7 @@ def status(config_dir: Optional[str]):
     """Show MCP OAuth Bridge status"""
     try:
         config = Config(config_dir)
-        token_manager = TokenManager(config)
+        token_manager = TokenManager(config.config_dir)
         
         if not os.path.exists(config.config_file):
             click.echo("❌ Configuration not initialized. Run 'mcp-oauth-bridge init' first.")
@@ -269,7 +280,7 @@ def status(config_dir: Optional[str]):
         if servers:
             click.echo("\nServers:")
             for server_name, server_config in servers.items():
-                url = server_config.get('url', 'Unknown')
+                url = server_config.url
                 
                 # Check token status
                 token = token_manager.get_token(server_name)
@@ -317,21 +328,28 @@ def refresh(name: str, config_dir: Optional[str], no_browser: bool):
 async def _refresh_token_async(name: str, config: Config, no_browser: bool):
     """Async helper for refreshing token"""
     try:
-        oauth_handler = OAuthHandler(config)
-        token_manager = TokenManager(config)
+        token_manager = TokenManager(config.config_dir)
+        oauth_handler = OAuthHandler(token_manager)
         
         server_config = config.get_server(name)
         current_token = token_manager.get_token(name)
         
-        if current_token and current_token.get('refresh_token'):
+        if current_token and current_token.refresh_token:
             click.echo(f"🔄 Refreshing token for '{name}'...")
-            new_token = await oauth_handler.refresh_token(
-                server_config['oauth_config'], 
-                current_token['refresh_token']
+            new_token = await oauth_handler.refresh_token_async(
+                server_config.oauth_config, 
+                current_token.refresh_token
             )
             
             if new_token:
-                token_manager.store_token(name, new_token)
+                new_token_data = TokenData(
+                    access_token=new_token.get('access_token'),
+                    refresh_token=new_token.get('refresh_token'),
+                    token_type=new_token.get('token_type', 'Bearer'),
+                    expires_at=new_token.get('expires_at'),
+                    scope=new_token.get('scope')
+                )
+                token_manager.store_token(name, new_token_data)
                 click.echo("✅ Token refreshed successfully!")
                 return
         
@@ -340,14 +358,21 @@ async def _refresh_token_async(name: str, config: Config, no_browser: bool):
         if not no_browser:
             click.echo("🌐 Opening browser for authorization...")
         
-        token = await oauth_handler.authorize_server(
-            server_config['oauth_config'], 
-            server_config.get('client_config'),
+        token = await oauth_handler.authorize_server_async(
+            server_config.oauth_config, 
+            getattr(server_config, 'client_config', None),
             not no_browser
         )
         
         if token:
-            token_manager.store_token(name, token)
+            token_data = TokenData(
+                access_token=token.get('access_token'),
+                refresh_token=token.get('refresh_token'),
+                token_type=token.get('token_type', 'Bearer'),
+                expires_at=token.get('expires_at'),
+                scope=token.get('scope')
+            )
+            token_manager.store_token(name, token_data)
             click.echo("✅ Re-authorization successful!")
         else:
             click.echo("❌ Re-authorization failed")

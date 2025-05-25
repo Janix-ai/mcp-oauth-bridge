@@ -215,4 +215,8 @@ class Config:
     @property
     def proxy_url(self) -> str:
         """Get the proxy server URL"""
-        return f"http://{self.proxy_host}:{self.proxy_port}" 
+        return f"http://{self.proxy_host}:{self.proxy_port}"
+
+    def save(self) -> None:
+        """Save current configuration (public interface)"""
+        self._save_config() 
