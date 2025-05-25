@@ -37,9 +37,9 @@ class ProxyServer:
     
     def __init__(self, config: Config):
         self.config = config
-        self.oauth_handler = OAuthHandler(config)
-        self.token_manager = TokenManager(config)
-        self.approval_manager = ApprovalManager(config)
+        self.token_manager = TokenManager(config.config_dir)
+        self.oauth_handler = OAuthHandler(self.token_manager)
+        self.approval_manager = ApprovalManager()
         self.openai_adapter = OpenAIAdapter()
         self.anthropic_adapter = AnthropicAdapter()
         
@@ -127,7 +127,7 @@ class ProxyServer:
                 raise HTTPException(status_code=401, detail=f"No valid OAuth token for server '{server_name}'")
             
             # Prepare target URL
-            target_url = f"{server['url'].rstrip('/')}/{path.lstrip('/')}"
+            target_url = f"{server.url.rstrip('/')}/mcp/{path.lstrip('/')}"
             
             # Get request data
             body = await request.body()
@@ -138,7 +138,7 @@ class ProxyServer:
             headers.pop('content-length', None)
             
             # Add OAuth token
-            headers['Authorization'] = f"Bearer {token['access_token']}"
+            headers['Authorization'] = f"Bearer {token.access_token}"
             
             # Forward request
             response = await self.http_client.request(
@@ -156,7 +156,7 @@ class ProxyServer:
                 if refreshed:
                     # Retry with new token
                     token = self.token_manager.get_token(server_name)
-                    headers['Authorization'] = f"Bearer {token['access_token']}"
+                    headers['Authorization'] = f"Bearer {token.access_token}"
                     response = await self.http_client.request(
                         method=request.method,
                         url=target_url,
@@ -205,18 +205,26 @@ class ProxyServer:
             
             # Get current token
             current_token = self.token_manager.get_token(server_name)
-            if not current_token or not current_token.get('refresh_token'):
+            if not current_token or not current_token.refresh_token:
                 return False
             
             # Refresh token
-            new_token = await self.oauth_handler.refresh_token(
-                server['oauth_config'], 
-                current_token['refresh_token']
+            new_token = await self.oauth_handler.refresh_token_async(
+                server.oauth_config, 
+                current_token.refresh_token
             )
             
             if new_token:
-                # Store new token
-                self.token_manager.store_token(server_name, new_token)
+                # Convert dict to TokenData and store
+                from .tokens import TokenData
+                new_token_data = TokenData(
+                    access_token=new_token.get('access_token'),
+                    refresh_token=new_token.get('refresh_token'),
+                    token_type=new_token.get('token_type', 'Bearer'),
+                    expires_at=new_token.get('expires_at'),
+                    scope=new_token.get('scope')
+                )
+                self.token_manager.store_token(server_name, new_token_data)
                 logger.info(f"Successfully refreshed token for {server_name}")
                 return True
             
