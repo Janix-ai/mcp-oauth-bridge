@@ -9,10 +9,10 @@ description = "Local OAuth bridge for MCP servers supporting OpenAI and Anthropi
 readme = "README.md"
 license = {text = "MIT"}
 authors = [
-    {name = "Scott Wilcox", email = "scott@example.com"}
+    {name = "Scott Wilcox", email = "scott@janix.ai"}
 ]
 maintainers = [
-    {name = "Scott Wilcox", email = "scott@example.com"}
+    {name = "Scott Wilcox", email = "scott@janix.ai"}
 ]
 keywords = ["oauth", "mcp", "openai", "anthropic", "authentication", "bridge"]
 classifiers = [

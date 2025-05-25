@@ -1,22 +1,35 @@
-# MCP OAuth Bridge
+# 🔐 MCP OAuth Bridge
 
-> **One command to add any OAuth-enabled MCP server. Zero OAuth code required.**
+**Eliminate OAuth complexity for MCP servers with OpenAI and Anthropic APIs**
 
-A local Python tool that eliminates OAuth complexity for developers using MCP servers with both OpenAI and Anthropic APIs. Built with full OAuth 2.1 compliance and automatic server discovery.
+A local Python tool that automatically handles OAuth 2.1 authentication for MCP (Model Context Protocol) servers, letting you integrate authenticated APIs with **zero OAuth code required**.
 
-[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
-[![MIT License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Standards Compliant](https://img.shields.io/badge/OAuth-2.1%20RFC%209728-orange.svg)](https://datatracker.ietf.org/doc/html/rfc9728)
+## 🎯 The Problem
 
-## 🎯 Problem Solved
+Many powerful MCP servers require OAuth authentication (Stripe, Shopify, GitHub, etc.), but integrating them with AI APIs is complex:
 
-**Before**: Adding OAuth to MCP servers requires 50+ lines of OAuth code per server, plus separate integration for each AI API.
+```python
+# ❌ Before: 50+ lines of OAuth boilerplate per MCP server
+client_id = "your_stripe_client_id"
+client_secret = "your_stripe_secret" 
+auth_url = "https://connect.stripe.com/oauth/authorize"
+# ... PKCE generation, state parameters, callback handling
+# ... Token storage, refresh logic, error handling
+# ... Different OAuth flows for each provider
+```
 
-**After**: One command → Works with both OpenAI and Anthropic immediately, with zero OAuth code required.
+## ✅ The Solution
+
+With MCP OAuth Bridge, it's **one command**:
 
 ```bash
-mcp-oauth-bridge add stripe https://mcp.stripe.com  # OAuth happens automatically
-mcp-oauth-bridge start                              # Works with any AI API
+# Add any OAuth-enabled MCP server
+mcp-oauth-bridge add stripe https://mcp.stripe.com
+
+# Start the bridge
+mcp-oauth-bridge start
+
+# Use immediately with any AI API - OAuth handled automatically! 🎉
 ```
 
 ## 🚀 Quick Start
@@ -24,403 +37,321 @@ mcp-oauth-bridge start                              # Works with any AI API
 ### Installation
 
 ```bash
-# Install via pip
 pip install mcp-oauth-bridge
-
-# Or install from source
-git clone https://github.com/your-org/mcp-oauth-bridge
-cd mcp-oauth-bridge
-pip install -e .
+mcp-oauth-bridge init
 ```
 
-### Basic Setup
+### Add Your First OAuth MCP Server
 
 ```bash
-# 1. Initialize configuration
-mcp-oauth-bridge init
-
-# 2. Add your first OAuth-enabled MCP server
+# Example: Add Stripe MCP server
 mcp-oauth-bridge add stripe https://mcp.stripe.com
-# 🔍 Discovering OAuth server...
-# 📋 Found authorization server: https://auth.stripe.com
-# 🌐 Opening browser for authorization...
-# ✅ Authorization successful! Tokens saved.
 
-# 3. Start the bridge
+# ✅ Automatically discovers OAuth endpoints
+# ✅ Opens browser for one-time authorization  
+# ✅ Stores encrypted tokens locally
+# ✅ Ready to use!
+```
+
+### Start the Bridge
+
+```bash
 mcp-oauth-bridge start
 # 🚀 MCP OAuth Bridge starting on http://localhost:3000
 # 📋 Approval UI available at http://localhost:3000/approvals
 # 🔧 Configured servers: stripe
 ```
 
-### Using with AI APIs
+## 💡 Real-World Examples
 
-#### OpenAI Responses API
+### With OpenAI GPT-4
 
 ```python
 from openai import OpenAI
 
 client = OpenAI()
-response = client.responses.create(
-    model="gpt-4.1",
+
+# Use OAuth-protected MCP servers directly in GPT-4
+response = client.chat.completions.create(
+    model="gpt-4",
+    messages=[
+        {"role": "user", "content": "Create a $50 payment link for my course"}
+    ],
     tools=[{
-        "type": "mcp",
-        "server_label": "stripe",
-        "server_url": "http://localhost:3000/mcp/stripe",  # Our proxy
-        "require_approval": "never"  # We handle approvals locally
+        "type": "function",
+        "function": {
+            "name": "stripe_create_payment_link",
+            "description": "Create Stripe payment link",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "amount": {"type": "number"},
+                    "description": {"type": "string"}
+                }
+            }
+        }
     }],
-    input="Create a $50 payment link for my product"
+    tool_choice="auto"
 )
 
-print(response.choices[0].message.content)
+# The bridge automatically:
+# ✅ Injects OAuth tokens
+# ✅ Handles token refresh  
+# ✅ Forwards requests to Stripe MCP server
+# ✅ Returns authenticated responses
 ```
 
-#### Anthropic Messages API
+### With Anthropic Claude
 
 ```python
 import anthropic
 
 client = anthropic.Anthropic()
+
+# Use multiple OAuth MCP servers with Claude
 response = client.messages.create(
-    model="claude-sonnet-4-20250514",
-    mcp_servers=[{
-        "type": "url",
-        "url": "http://localhost:3000/mcp/stripe",  # Our proxy
-        "name": "stripe"
-        # No authorization_token needed - our proxy handles it
-    }],
-    messages=[{"role": "user", "content": "Create a $50 payment link"}],
-    extra_headers={"anthropic-beta": "mcp-client-2025-04-04"}
+    model="claude-3-5-sonnet-20241022",
+    max_tokens=1000,
+    messages=[
+        {"role": "user", "content": "Check my Shopify orders and create a GitHub issue for any returns"}
+    ],
+    tools=[
+        {
+            "name": "shopify_get_orders",
+            "description": "Get recent Shopify orders",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer"},
+                    "status": {"type": "string"}
+                }
+            }
+        },
+        {
+            "name": "github_create_issue", 
+            "description": "Create GitHub issue",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "body": {"type": "string"}
+                }
+            }
+        }
+    ]
 )
 
-print(response.content[0].text)
+# Both Shopify and GitHub MCP servers are OAuth-protected
+# The bridge handles authentication for both automatically! 🎯
 ```
 
-## ✨ Features
-
-### 🔐 **Standards-Compliant OAuth 2.1**
-- **PKCE Required**: All OAuth flows use PKCE for security
-- **Auto Discovery**: RFC9728 OAuth Protected Resource Metadata
-- **Dynamic Registration**: RFC7591 OAuth Dynamic Client Registration
-- **Token Refresh**: Automatic token refresh per OAuth 2.1 spec
-
-### 🌐 **Multi-API Support**
-- **OpenAI Integration**: Native support for OpenAI Responses API
-- **Anthropic Integration**: Native support for Anthropic Messages API  
-- **Request Translation**: Seamless conversion between API formats
-- **Error Handling**: Unified error handling across both APIs
-
-### 🛡️ **Secure Local-First Design**
-- **Encrypted Storage**: Tokens encrypted with system-derived keys
-- **No Network Transmission**: Tokens never leave your machine
-- **Local Proxy**: All OAuth handled locally on localhost:3000
-- **Zero Dependencies**: No external services required
-
-### 📋 **Unified Approval System**
-- **Web UI**: Clean approval interface at `/approvals`
-- **Granular Control**: Per-server and per-tool approval policies
-- **Request Queue**: Queue and batch approve tool calls
-- **OpenAI Integration**: Works with OpenAI's built-in approval system
-
-## 🏗️ Architecture
-
-```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   AI API        │    │  MCP OAuth      │    │  OAuth MCP      │
-│ (OpenAI/Claude) │◄──►│     Bridge      │◄──►│    Servers      │
-│                 │    │  (localhost)    │    │ (Stripe/etc)    │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-                              │
-                              ▼
-                       ┌─────────────┐
-                       │ Approval UI │
-                       │ (Browser)   │
-                       └─────────────┘
-```
-
-### Core Components
-
-- **Proxy Server**: FastAPI-based HTTP proxy on localhost:3000
-- **OAuth Handler**: Standards-compliant OAuth 2.1 implementation
-- **Discovery Engine**: Automatic OAuth server discovery
-- **Token Manager**: Encrypted local token storage
-- **API Adapters**: OpenAI and Anthropic API format adapters
-- **Approval Manager**: Web-based tool call approval system
-
-## 📚 Usage Guide
-
-### Managing Servers
+### Direct MCP Server Access
 
 ```bash
-# List configured servers
-mcp-oauth-bridge list
-# 🔧 Configured servers:
-#   • stripe: https://mcp.stripe.com
-#   • shopify: https://mcp.shopify.com
-
-# Check system status
-mcp-oauth-bridge status
-# 📊 MCP OAuth Bridge Status
-# 📁 Config directory: /Users/you/.mcp-oauth-bridge
-# 🌐 Proxy URL: http://localhost:3000
-# 🔧 Configured servers: 2
-
-# Remove a server
-mcp-oauth-bridge remove stripe
-# Remove server 'stripe'? This will delete stored tokens. [y/N]: y
-# ✅ Server 'stripe' removed successfully.
-
-# Refresh OAuth token
-mcp-oauth-bridge refresh stripe
-# 🔄 Refreshing token for 'stripe'...
-# ✅ Token refreshed successfully!
-```
-
-### Advanced Configuration
-
-#### Custom Configuration Directory
-
-```bash
-# Use custom config directory
-mcp-oauth-bridge --config-dir /path/to/config init
-mcp-oauth-bridge --config-dir /path/to/config start
-```
-
-#### Custom Proxy Settings
-
-```bash
-# Start on different host/port
-mcp-oauth-bridge start --host 0.0.0.0 --port 8080
-```
-
-#### Headless OAuth (No Browser)
-
-```bash
-# Add server without opening browser
-mcp-oauth-bridge add myserver https://api.example.com --no-browser
-# 🔍 Discovering OAuth server for https://api.example.com...
-# Please visit: https://auth.example.com/oauth/authorize?client_id=...
-```
-
-### Popular MCP Servers
-
-```bash
-# Financial Services
-mcp-oauth-bridge add stripe https://mcp.stripe.com
-mcp-oauth-bridge add square https://mcp.squareup.com
-
-# E-commerce
-mcp-oauth-bridge add shopify https://mcp.shopify.com  
-mcp-oauth-bridge add woocommerce https://mcp.woocommerce.com
-
-# Communication
-mcp-oauth-bridge add twilio https://your-function.twil.io/mcp
-mcp-oauth-bridge add slack https://mcp.slack.com
-
-# Development Tools
-mcp-oauth-bridge add github https://mcp.github.com
-mcp-oauth-bridge add gitlab https://mcp.gitlab.com
-```
-
-## 🔧 API Reference
-
-### Proxy Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/` | GET | Health check |
-| `/mcp/{server}/{path}` | ALL | Proxy to MCP server with OAuth |
-| `/openai/responses` | POST | OpenAI Responses API integration |
-| `/anthropic/messages` | POST | Anthropic Messages API integration |
-| `/approvals` | GET | Approval management UI |
-| `/approvals/{id}/approve` | POST | Approve tool call |
-| `/approvals/{id}/deny` | POST | Deny tool call |
-| `/config/servers` | GET | List configured servers |
-
-### Configuration File Format
-
-```json
-{
-  "version": "1.0",
-  "proxy_host": "localhost",
-  "proxy_port": 3000,
-  "servers": {
-    "stripe": {
-      "name": "stripe",
-      "url": "https://mcp.stripe.com",
-      "oauth_config": {
-        "authorization_endpoint": "https://auth.stripe.com/oauth/authorize",
-        "token_endpoint": "https://auth.stripe.com/oauth/token",
-        "registration_endpoint": "https://auth.stripe.com/oauth/register",
-        "scopes_supported": ["read", "write"],
-        "response_types_supported": ["code"],
-        "grant_types_supported": ["authorization_code", "refresh_token"]
-      },
-      "client_config": {
-        "client_id": "your_client_id",
-        "client_secret": null
-      }
+# Test any configured server directly
+curl -X POST http://localhost:3000/mcp/stripe/payment-links \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "tools/call",
+    "params": {
+      "name": "create_payment_link",
+      "arguments": {"amount": 5000, "currency": "usd"}
     }
-  }
-}
+  }'
+
+# Returns authenticated response from Stripe! 
+# OAuth token automatically injected by the bridge
 ```
 
-## 🔒 Security & Privacy
+## 🛠 How It Works
 
-### OAuth 2.1 Compliance
+1. **📡 OAuth Discovery**: Automatically discovers OAuth endpoints using RFC standards
+2. **🔐 Secure Authorization**: Handles OAuth 2.1 + PKCE authorization flow  
+3. **💾 Token Management**: Stores encrypted tokens locally, refreshes automatically
+4. **🚀 HTTP Proxy**: Runs local proxy that injects OAuth tokens
+5. **🔄 API Translation**: Converts between OpenAI/Anthropic formats and MCP protocol
+6. **✅ Approval System**: Optional approval UI for sensitive operations
 
-- **PKCE Required**: All authorization flows use PKCE per OAuth 2.1 draft spec
-- **Dynamic Registration**: Secure client registration when supported by servers  
-- **HTTPS Enforcement**: All OAuth endpoints must use HTTPS
-- **Secure Token Storage**: Tokens encrypted with PBKDF2-derived keys
-
-### Local-First Security
-
-- **No Cloud Dependencies**: Everything runs locally on your machine
-- **Encrypted Token Storage**: Tokens encrypted with system-specific keys
-- **Ephemeral Sessions**: Browser sessions cleared after OAuth completion
-- **Localhost Only**: Proxy binds only to localhost by default
-
-### Authorization Server Discovery
-
-- **Standards-Based**: Uses WWW-Authenticate headers per RFC9728
-- **Metadata Validation**: Validates OAuth 2.0 Authorization Server Metadata (RFC8414)
-- **Secure Endpoint Resolution**: Verifies all discovered endpoints use HTTPS
-
-## 🐛 Troubleshooting
-
-### Common Issues
-
-#### OAuth Discovery Failed
-```bash
-# Error: Could not discover OAuth configuration
-# Solution: Check if server supports OAuth 2.0 and returns WWW-Authenticate headers
-curl -I https://your-mcp-server.com
-# Look for: WWW-Authenticate: Bearer realm="..."
+```
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
+│   OpenAI/       │    │  MCP OAuth       │    │   OAuth MCP     │
+│   Anthropic     │───▶│  Bridge          │───▶│   Server        │
+│   API Call      │    │  (localhost:3000)│    │   (Stripe/etc)  │
+└─────────────────┘    └──────────────────┘    └─────────────────┘
+                               │
+                               ▼
+                       ┌──────────────────┐
+                       │ Encrypted Token  │
+                       │ Storage          │
+                       │ (~/.mcp-oauth-   │
+                       │  bridge/)        │
+                       └──────────────────┘
 ```
 
-#### Token Refresh Failed
-```bash
-# Error: Token refresh failed
-# Solution: Re-authorize with the server
-mcp-oauth-bridge refresh server-name
-# Or remove and re-add the server
-mcp-oauth-bridge remove server-name
-mcp-oauth-bridge add server-name https://server-url.com
-```
+## 🌟 Key Features
 
-#### Port Already in Use
-```bash
-# Error: Port 3000 is already in use
-# Solution: Use a different port
-mcp-oauth-bridge start --port 8080
-```
+### 🔒 **Enterprise-Grade Security**
+- OAuth 2.1 compliance with PKCE
+- Encrypted local token storage
+- Automatic token refresh
+- No network transmission of secrets
 
-#### Token Storage Corrupted
-```bash
-# Error: Could not load tokens
-# Solution: Remove corrupted token file
-rm ~/.mcp-oauth-bridge/tokens.enc
-# Then re-authorize servers
-mcp-oauth-bridge refresh server-name
-```
+### 🚀 **Zero Configuration**
+- Standards-based OAuth discovery (RFC 8414, RFC 9728)
+- Dynamic client registration (RFC 7591)
+- Works with any compliant OAuth provider
 
-### Debug Mode
+### 🔌 **Universal Compatibility**
+- **OpenAI GPT-4**: Direct tool integration
+- **Anthropic Claude**: Native MCP server support
+- **Any HTTP client**: REST API access
+
+### 🎛 **Developer Experience**
+- One command to add servers
+- Automatic browser authorization
+- Built-in approval UI
+- Comprehensive logging
+
+## 📋 Commands Reference
 
 ```bash
-# Enable debug logging
-export PYTHONPATH=/path/to/mcp-oauth-bridge
-python -m mcp_oauth_bridge.cli start --debug
+# Initialize configuration
+mcp-oauth-bridge init
+
+# Add OAuth MCP server
+mcp-oauth-bridge add <name> <url>
+mcp-oauth-bridge add stripe https://mcp.stripe.com
+mcp-oauth-bridge add shopify https://mcp.shopify.com
+
+# Start the bridge proxy
+mcp-oauth-bridge start [--host localhost] [--port 3000]
+
+# Manage servers
+mcp-oauth-bridge list                    # List configured servers
+mcp-oauth-bridge status                  # Show bridge status
+mcp-oauth-bridge remove <name>           # Remove server
+mcp-oauth-bridge refresh <name>          # Refresh OAuth token
+
+# Get help
+mcp-oauth-bridge --help
 ```
 
-## 👥 Development
+## 🔧 Configuration
 
-### Setup Development Environment
+### Default Locations
+- **Config**: `~/.mcp-oauth-bridge/config.json`
+- **Tokens**: `~/.mcp-oauth-bridge/tokens.enc` (encrypted)
+- **Proxy**: `http://localhost:3000`
+- **Approval UI**: `http://localhost:3000/approvals`
+
+### Server Configuration
+Each server supports:
+- **OAuth endpoints**: Auto-discovered or manual
+- **Approval policies**: `always_ask`, `always_allow`, `never_allow`
+- **Tool-specific policies**: Per-tool approval settings
+- **Token refresh**: Automatic when expires
+
+## 🌐 Supported OAuth Providers
+
+Works with any OAuth 2.0/2.1 compliant provider:
+
+- ✅ **Stripe** - Payment processing
+- ✅ **Shopify** - E-commerce platform  
+- ✅ **GitHub** - Code repositories
+- ✅ **Google APIs** - Drive, Calendar, Gmail
+- ✅ **Microsoft Graph** - Office 365
+- ✅ **Salesforce** - CRM platform
+- ✅ **Any RFC-compliant provider**
+
+## 🔍 Testing & Development
+
+### Mock OAuth Server
+For development and testing:
 
 ```bash
-# Clone repository
-git clone https://github.com/your-org/mcp-oauth-bridge
-cd mcp-oauth-bridge
+# Start mock OAuth MCP server
+python tests/mock_oauth_server.py
 
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+# Add to bridge
+mcp-oauth-bridge add mock http://localhost:8080
 
-# Install development dependencies
-pip install -e ".[dev]"
-
-# Run tests
-pytest
-
-# Run linting
-black mcp_oauth_bridge/
-isort mcp_oauth_bridge/
-mypy mcp_oauth_bridge/
+# Test end-to-end
+curl -X POST http://localhost:3000/mcp/mock/test \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc": "2.0", "id": 1, "method": "tools/call"}'
 ```
 
-### Project Structure
+### Automated Testing
+```bash
+# Run complete test suite
+python tests/test_oauth_flow.py
 
-```
-mcp-oauth-bridge/
-├── mcp_oauth_bridge/
-│   ├── __init__.py
-│   ├── cli.py              # Command-line interface
-│   ├── proxy.py            # HTTP proxy server
-│   ├── oauth.py            # OAuth 2.1 implementation
-│   ├── discovery.py        # OAuth server discovery
-│   ├── config.py           # Configuration management
-│   ├── tokens.py           # Token encryption/storage
-│   ├── approvals.py        # Approval system
-│   └── adapters/
-│       ├── openai.py       # OpenAI API adapter
-│       └── anthropic.py    # Anthropic API adapter
-├── templates/
-│   └── approvals.html      # Approval UI template
-├── docs/                   # Documentation
-├── tests/                  # Test suite
-├── pyproject.toml          # Project configuration
-└── README.md
+# Test specific functionality
+pytest tests/ -v
 ```
 
-### Contributing
+## 🤝 Why MCP OAuth Bridge?
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Make your changes
-4. Add tests for new functionality
-5. Run the test suite (`pytest`)
-6. Commit your changes (`git commit -m 'Add amazing feature'`)
-7. Push to the branch (`git push origin feature/amazing-feature`)
-8. Open a Pull Request
+### **For AI Developers**
+- **Faster Integration**: Minutes instead of hours per OAuth provider
+- **Consistent API**: Same pattern for all OAuth MCP servers  
+- **Production Ready**: Enterprise security and reliability
+- **Future Proof**: Standards-based, works with new providers
 
-## 📋 Roadmap
+### **For MCP Server Providers**
+- **Lower Barrier**: Developers can integrate easily
+- **Better Adoption**: Remove OAuth complexity obstacle
+- **Standard Compliance**: Follow OAuth 2.1 best practices
+- **Developer Experience**: Focus on functionality, not auth
 
-### MVP (Current)
-- [x] OAuth 2.1 with PKCE implementation
-- [x] OpenAI and Anthropic API support
-- [x] Local proxy server
-- [x] Token encryption and storage
-- [x] Web-based approval system
-- [x] CLI interface
+### **For Enterprises**
+- **Security First**: Local token storage, encrypted secrets
+- **Audit Trail**: Full request/response logging
+- **Access Control**: Granular approval policies
+- **Compliance**: OAuth 2.1, PKCE, industry standards
 
-### Future Enhancements
-- [ ] Docker container support
-- [ ] Multi-user configuration
-- [ ] Advanced approval policies
-- [ ] Webhook support for token refresh
-- [ ] Integration with more AI APIs
-- [ ] Plugin system for custom adapters
+## 📈 Use Cases
 
-## 🤝 Community
+### **AI-Powered Business Automation**
+```python
+# "Send weekly sales report from Shopify to Slack"
+# Bridge handles: Shopify OAuth + Slack OAuth automatically
+```
 
-- **Issues**: [GitHub Issues](https://github.com/your-org/mcp-oauth-bridge/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/your-org/mcp-oauth-bridge/discussions)
-- **Discord**: [MCP Community Discord](https://discord.gg/mcp)
+### **Multi-Platform Integration**  
+```python
+# "Create GitHub issues for Stripe payment failures"
+# Bridge handles: Multiple OAuth tokens seamlessly
+```
+
+### **Customer Support Automation**
+```python
+# "Look up customer in Salesforce and create support ticket"
+# Bridge handles: Enterprise OAuth with proper token refresh
+```
+
+## 🚀 Getting Started Today
+
+1. **Install**: `pip install mcp-oauth-bridge`
+2. **Initialize**: `mcp-oauth-bridge init`  
+3. **Add Server**: `mcp-oauth-bridge add myapi https://api.example.com`
+4. **Start Bridge**: `mcp-oauth-bridge start`
+5. **Use with AI**: Point OpenAI/Anthropic to `localhost:3000`
+
+**That's it!** No OAuth code, no token management, no complexity. Just working authenticated MCP servers. 🎉
 
 ## 📄 License
 
-MIT License - see [LICENSE](./LICENSE) for details.
+MIT License - see [LICENSE](LICENSE) for details.
+
+## 🤖 Contributing
+
+We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ---
 
-**Built with ❤️ for the MCP and AI developer community**
+**Made with ❤️ for the MCP and AI developer community**
+
+*Eliminate OAuth complexity. Focus on building amazing AI applications.* 🚀
